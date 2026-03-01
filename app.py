@@ -133,7 +133,7 @@ def delete_account_by_id(account_row_id):
     conn.commit()
     conn.close()
 
-# ---------- Async mail.tm API Helpers (with aiohttp) ----------
+# ---------- Async mail.tm API Helpers with Response Validation ----------
 async def api_request(session, method, url, **kwargs):
     """Make an HTTP request with retry logic using aiohttp."""
     for attempt in range(MAX_RETRIES):
@@ -144,9 +144,12 @@ async def api_request(session, method, url, **kwargs):
                     await asyncio.sleep(wait)
                     continue
                 resp.raise_for_status()
-                if resp.content_type == 'application/json':
+                # Always try to parse JSON; if fails, return text (unlikely for mail.tm)
+                try:
                     return await resp.json()
-                return await resp.text() if resp.content else None
+                except aiohttp.ContentTypeError:
+                    # Not JSON – return text (caller must handle)
+                    return await resp.text()
         except aiohttp.ClientResponseError as e:
             if e.status == 429:
                 wait = RETRY_DELAY * (2 ** attempt)
@@ -154,7 +157,6 @@ async def api_request(session, method, url, **kwargs):
                 continue
             raise
         except aiohttp.ClientError as e:
-            # Network errors, retry
             if attempt == MAX_RETRIES - 1:
                 raise
             await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
@@ -162,28 +164,41 @@ async def api_request(session, method, url, **kwargs):
 
 async def get_domains(session):
     data = await api_request(session, "GET", f"{MAIL_API_BASE}/domains")
-    domains = data['hydra:member']
+    if not isinstance(data, dict):
+        raise Exception(f"Invalid response from domains API: {data}")
+    domains = data.get('hydra:member', [])
     if not domains:
         raise Exception("No domains available")
     return domains[0]['domain']
 
 async def create_account(session, email, password):
     payload = {"address": email, "password": password}
-    return await api_request(session, "POST", f"{MAIL_API_BASE}/accounts", json=payload)
+    data = await api_request(session, "POST", f"{MAIL_API_BASE}/accounts", json=payload)
+    if not isinstance(data, dict):
+        raise Exception(f"Invalid response from create_account API: {data}")
+    return data
 
 async def get_token(session, email, password):
     payload = {"address": email, "password": password}
     data = await api_request(session, "POST", f"{MAIL_API_BASE}/token", json=payload)
+    if not isinstance(data, dict) or "token" not in data:
+        raise Exception(f"Invalid token response: {data}")
     return data["token"]
 
 async def get_messages(session, token):
     headers = {"Authorization": f"Bearer {token}"}
     data = await api_request(session, "GET", f"{MAIL_API_BASE}/messages", headers=headers)
+    if not isinstance(data, dict):
+        # Unexpected response – treat as empty
+        return []
     return data.get("hydra:member", [])
 
 async def get_message(session, token, msg_id):
     headers = {"Authorization": f"Bearer {token}"}
-    return await api_request(session, "GET", f"{MAIL_API_BASE}/messages/{msg_id}", headers=headers)
+    data = await api_request(session, "GET", f"{MAIL_API_BASE}/messages/{msg_id}", headers=headers)
+    if not isinstance(data, dict):
+        raise Exception(f"Invalid message response: {data}")
+    return data
 
 async def delete_account_api(session, account_id, token):
     headers = {"Authorization": f"Bearer {token}"}
@@ -219,11 +234,10 @@ def format_message(msg):
     else:
         content = "(No content)"
 
-    # Trim if too long (Telegram limit ~4000)
+    # Trim if too long
     if len(content) > 3000:
         content = content[:3000] + "… (truncated)"
 
-    # Return as monospace block
     return f"```\nSubject: {subject}\nFrom: {from_}\nDate: {date}\n\n{content}\n```"
 
 # ---------- Bot Handlers ----------
@@ -565,7 +579,7 @@ def main():
     application.add_handler(CallbackQueryHandler(admin_callback, pattern="^user_"))
     application.add_handler(broadcast_conv)
 
-    print("Bot started with async HTTP. Press Ctrl+C to stop.")
+    print("Bot started with async HTTP and response validation. Press Ctrl+C to stop.")
     application.run_polling()
 
 if __name__ == "__main__":
