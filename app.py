@@ -19,7 +19,7 @@ from telegram.ext import (
 )
 
 # ---------- Configuration ----------
-TELEGRAM_TOKEN = "8585265829:AAGyQ0V6_RivO7O5zzUXvoz5sscWErkf4q"          # Replace with your bot token
+TELEGRAM_TOKEN = "8585265829:AAGyQ0V6_RivO7O5zzUXvoz5sscWErkf4qQ"          # Replace with your bot token
 ADMIN_IDS = [8286198145]         # List of admin Telegram user IDs
 MAIL_API_BASE = "https://api.mail.tm"
 MAX_RETRIES = 3
