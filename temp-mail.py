@@ -240,7 +240,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(user.id, user.username, user.first_name)
 
     db_user = get_user(user.id)
-    if db_user and db_user[4]:  # banned
+    # Use last column (banned) for check – safe against column reordering
+    if db_user and db_user[-1]:
         await update.message.reply_text("🚫 You are banned.")
         return
 
@@ -261,7 +262,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     db_user = get_user(user.id)
-    if db_user and db_user[4]:
+    if db_user and db_user[-1]:
         await update.message.reply_text("🚫 You are banned.")
         return
 
